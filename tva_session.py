@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -14,10 +13,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Constants
-# ─────────────────────────────────────────────────────────────────────────────
-
 MAIN_MODEL = "claude-haiku-4-5"
 HAIKU_MODEL = "claude-haiku-4-5"            # compression + fact-check
 MAX_HISTORY_CHARS = 6000                    # compress when raw history exceeds this
@@ -27,10 +22,6 @@ MAX_TOKENS_FACTCHECK = 256
 
 DRIFT_TAG = "[DRIFT WARNING]"
 CORRECTION_TAG = "[CORRECTION REQUESTED]"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# State dataclass
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class SessionState:
@@ -63,11 +54,6 @@ class SessionState:
         except json.JSONDecodeError:
             return cls()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TVASession
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TVASession:
     """
     A hallucination-reducing wrapper around the Anthropic client.
@@ -97,32 +83,12 @@ class TVASession:
 
         self.state = SessionState(original_goal=goal)
 
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def chat(
         self,
         user_message: str,
         on_token: Optional[callable] = None,
     ) -> tuple[str, dict]:
-        """
-        Send a user message, receive a (response_text, meta) tuple.
-
-        Parameters
-        ----------
-        user_message : str
-            The user's input.
-        on_token : callable, optional
-            If provided, called with each text token as it streams from the
-            main model.  Signature: ``on_token(token: str) -> None``.
-            When None the reply is returned silently (no printing).
-
-        meta keys
-        ---------
-        flagged      : bool   – True if fact-grounding detected drift
-        drift_detail : str    – Haiku's YES/NO + list string
-        corrected    : bool   – True if a correction pass was run
-        turn_count   : int    – Turn number (1-based)
-        """
         self._turn_count += 1
 
         # 4. Anchor injection — build system prompt (zero extra calls)
@@ -130,8 +96,6 @@ class TVASession:
 
         # Append user turn to history
         self._history.append({"role": "user", "content": user_message})
-
-        # Call main model (streaming if on_token provided)
         assistant_reply = self._call_main(system, on_token=on_token)
 
         # Append assistant turn to history
@@ -151,9 +115,7 @@ class TVASession:
         # 2. Update structured state
         self._update_state(user_message, assistant_reply)
 
-        # 1. Context compression — trigger when raw history actually grows too large,
-        #    not on a fixed turn schedule. Short exchanges never compress; long ones
-        #    compress as soon as they need to.
+        # 1. Context compression — trigger when raw history actually grows too large
         history_chars = sum(len(m["content"]) for m in self._history)
         if history_chars > MAX_HISTORY_CHARS:
             self._compress_history()
@@ -166,7 +128,6 @@ class TVASession:
         }
         return assistant_reply, meta
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _build_system_prompt(self) -> str:
         """Assemble the full system prompt injected on every call."""
@@ -217,11 +178,6 @@ class TVASession:
         return "\n".join(f"│   • {item}" for item in items)
 
     def _call_main(self, system: str, on_token: Optional[callable] = None) -> str:
-        """Single call to the main model with current history.
-
-        If *on_token* is provided the response is streamed and each token is
-        forwarded to the callback; the full text is still returned.
-        """
         messages = self._build_messages()
         if on_token is not None:
             with self._client.messages.stream(
@@ -243,20 +199,14 @@ class TVASession:
             return response.content[0].text.strip()
 
     def _build_messages(self) -> list[dict]:
-        """Return history (with compressed prefix already encoded in system)."""
         return list(self._history)
 
     # 3. Fact grounding check ─────────────────────────────────────────────────
 
     def _fact_grounding_check(self, reply: str) -> tuple[bool, str]:
-        """
-        Ask Haiku whether the reply introduces unsupported facts.
-        Returns (flagged: bool, detail: str).
-        """
         history_text = "\n".join(
             f"{m['role'].upper()}: {m['content']}" for m in self._history[:-1]
         )
-        # Include established_facts so manually-injected facts aren't mis-flagged.
         facts_block = ""
         if self.state.established_facts:
             facts_block = (
@@ -297,7 +247,6 @@ class TVASession:
     # 3. Correction pass ──────────────────────────────────────────────────────
 
     def _correction_pass(self, original_reply: str) -> str:
-        """Re-prompt the main model asking it to remove unsupported claims."""
         correction_instruction = textwrap.dedent(f"""
             Your previous response was flagged for potentially introducing facts
             that are not grounded in the conversation history.
@@ -328,7 +277,6 @@ class TVASession:
     # 2. State update ─────────────────────────────────────────────────────────
 
     def _update_state(self, user_msg: str, assistant_msg: str) -> None:
-        """Ask Haiku to extract state updates and merge them."""
         current_json = self.state.to_json()
         prompt = textwrap.dedent(f"""
             Current session state:
@@ -363,7 +311,6 @@ class TVASession:
     # 1. Context compression ──────────────────────────────────────────────────
 
     def _compress_history(self) -> None:
-        """Summarise existing history into a tight factual paragraph."""
         if not self._history:
             return
 
@@ -403,23 +350,19 @@ class TVASession:
     # ── Public state-mutation helpers ─────────────────────────────────────────
 
     def add_fact(self, fact: str) -> None:
-        """Inject a grounded fact directly into the session state."""
         if fact not in self.state.established_facts:
             self.state.established_facts.append(fact)
 
     def add_constraint(self, constraint: str) -> None:
-        """Add a constraint to the session state."""
         if constraint not in self.state.active_constraints:
             self.state.active_constraints.append(constraint)
 
     def remove_constraint(self, constraint: str) -> None:
-        """Remove a constraint by exact text match."""
         self.state.active_constraints = [
             c for c in self.state.active_constraints if c != constraint
         ]
 
     def reset(self, keep_goal: bool = True) -> None:
-        """Clear history and state.  Pass keep_goal=False to wipe the goal too."""
         goal = self.state.original_goal if keep_goal else ""
         self._history = []
         self._compressed_prefix = ""
@@ -427,7 +370,6 @@ class TVASession:
         self._last_was_flagged = False
         self.state = SessionState(original_goal=goal)
 
-    # ── Persistence ───────────────────────────────────────────────────────────
 
     def save(self, filepath: str) -> None:
         """Persist the session (state, history, compressed prefix) to a JSON file."""
@@ -455,24 +397,6 @@ class TVASession:
         obj._last_was_flagged = False
         obj.state = SessionState.from_json(json.dumps(data.get("state", {})))
         return obj
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────────────
-
-BANNER = """
-╔══════════════════════════════════════════════════════════════╗
-║              TVASession — Hallucination-Reduced Chat         ║
-║  Commands:  /state            show full session state        ║
-║             /history          show raw turn history          ║
-║             /facts            show established facts         ║
-║             /summary          show compressed history prefix ║
-║             /compress         manually compress history now  ║
-║             /save [file]      save session to JSON file      ║
-║             /quit             exit                           ║
-╚══════════════════════════════════════════════════════════════╝
-"""
 
 def print_meta(meta: dict) -> None:
     if meta["flagged"]:
@@ -566,7 +490,6 @@ def run_cli() -> None:
 
 
 if __name__ == "__main__":
-    # Quick sanity check: ensure the API key is present before starting
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print(
             "ERROR: ANTHROPIC_API_KEY is not set.\n"
