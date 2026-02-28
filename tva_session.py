@@ -398,6 +398,11 @@ class TVASession:
         obj.state = SessionState.from_json(json.dumps(data.get("state", {})))
         return obj
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
+
 def print_meta(meta: dict) -> None:
     if meta["flagged"]:
         print(f"\n  {DRIFT_TAG}")
@@ -409,7 +414,6 @@ def print_meta(meta: dict) -> None:
 
 
 def run_cli() -> None:
-    print(BANNER)
 
     goal = input("Enter your session goal (one sentence): ").strip()
     if not goal:
